@@ -32,7 +32,7 @@
 			<plugin>
 				<groupId>org.mule.tools.maven</groupId>
 				<artifactId>mule-maven-plugin</artifactId>
-				<version>${mule.maven.plugin.version}</version>
+				<version>3.8.0</version>
 				<extensions>true</extensions>
 				<configuration>
 					<cloudHubDeployment>
@@ -52,8 +52,6 @@
 							<maven.compiler.source>1.8</maven.compiler.source>
 							<anypoint.platform.client_id>d9f6bcbf0ce74ba495d01afdfc387b05</anypoint.platform.client_id>
 							<anypoint.platform.client_secret>a8C1B76D3a3b4169B77741BbD9B35B93</anypoint.platform.client_secret>
-							<mule.env>dev</mule.env>
-							<mule.key>12345678mulesoft</mule.key>
 						</properties>
 					</cloudHubDeployment>
 					<classifier>mule-application</classifier>
