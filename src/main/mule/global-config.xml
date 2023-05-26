@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns:pubsub="http://www.mulesoft.org/schema/mule/pubsub"
+	xmlns:x12="http://www.mulesoft.org/schema/mule/x12"
+	xmlns:sftp="http://www.mulesoft.org/schema/mule/sftp"
+	xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:tls="http://www.mulesoft.org/schema/mule/tls"
+	xmlns:cofww-logger="http://www.mulesoft.org/schema/mule/cofww-logger"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+	xmlns:api-gateway="http://www.mulesoft.org/schema/mule/api-gateway" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd 
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/api-gateway http://www.mulesoft.org/schema/mule/api-gateway/current/mule-api-gateway.xsd
+http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd
+http://www.mulesoft.org/schema/mule/cofww-logger http://www.mulesoft.org/schema/mule/cofww-logger/current/mule-cofww-logger.xsd
+http://www.mulesoft.org/schema/mule/tls http://www.mulesoft.org/schema/mule/tls/current/mule-tls.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/sftp http://www.mulesoft.org/schema/mule/sftp/current/mule-sftp.xsd
+http://www.mulesoft.org/schema/mule/x12 http://www.mulesoft.org/schema/mule/x12/current/mule-x12.xsd
+http://www.mulesoft.org/schema/mule/pubsub http://www.mulesoft.org/schema/mule/pubsub/current/mule-pubsub.xsd">
+
+	<!-- This configuration uses default algorithm (AES) and mode (CBC) -->
+	<secure-properties:config
+		name="Secure_Properties_Config"
+		doc:name="Environment-specific Secure Properties Config"
+		doc:id="b64daa35-1683-43f6-84c9-21776df3753a"
+		file="config/config-secured-${mule.env}.yaml"
+		key="${mule.key}" />
+
+	<configuration-properties
+		doc:name="Application Configuration properties"
+		doc:id="4e9071c0-5800-46f3-8031-b1ae639c2256"
+		file="config/config-${mule.env}.yaml" />
+
+	<configuration-properties
+		doc:name="Common Configuration properties"
+		doc:id="8f0a30ee-8023-4aa2-91a3-c8ab1f805c27"
+		file="config/config-common.yaml" />
+
+	<api-gateway:autodiscovery apiId="${api.id}"
+		doc:name="API Autodiscovery"
+		doc:id="99fac178-73f2-484b-8821-be13d2c2201a" flowRef="orders-papi-main"
+		ignoreBasePath="true" />
+
+	<http:listener-config name="http-listener-config">
+        <http:listener-connection host="${https.host}" port="${https.port}" protocol="HTTPS" tlsContext="tls-vv"/>
+    </http:listener-config>
+    <apikit:config name="orders-papi-config" api="resource::3d244ed7-6ddf-49a9-be6d-96e22048cbc0:orders-papi:1.0.6:raml:zip:orders-papi.raml" outboundHeadersMapName="outboundHeaders" httpStatusVarName="httpStatus" />
+    
+    
+    <x12:config name="X12_EDI_Config" doc:name="X12 EDI Config" doc:id="e4758735-361c-4c1d-a80a-1c1211b13469" defaultUsageIndicator="${x12.defaultUsageIndicator}" interchangeIdQualifierSelf="${x12.interchangeIdQualifierSelf}" interchangeIdSelf="${x12.interchangeIdSelf}" interchangeIdQualifierPartner="${x12.interchangeIdQualifierPartner}" interchangeIdPartner="${x12.interchangeIdPartner}" groupIdSelf="${x12.groupIdSelf}" groupIdPartner="${x12.groupIdPartner}" componentSeparator="${x12.componentSeparator}" batchOutputEdiMimeType="APPLICATION_EDIX12" batchDefaultUsageIndicator="${x12.defaultUsageIndicator}" outputEdiMimeType="APPLICATION_EDIX12">
+		<x12:schemas >
+			<x12:schema value="${x12.value}" />
+		</x12:schemas>
+	</x12:config>
+
+	<tls:context name="tls-vv" doc:name="TLS Context" doc:id="5dd20cd8-d02e-4879-af6b-5737ad42b3e6" >
+	
+	<tls:key-store type="jks" path="${tls.path}" alias="${tls.alias}" keyPassword="${secure::tls.keyPassword}" password="${secure::tls.password}" />
+	
+	</tls:context>
+	<http:request-config name="cwm-sapi" doc:name="HTTP Request configuration" doc:id="d22b5e7d-89f4-4ddf-bc26-b26524d0867c" doc:description="cwm-sapi">
+		<http:request-connection host="${httpRequestcwm.host}" port="${httpRequestcwm.port}" protocol="HTTPS">
+				<tls:context >
+				<tls:trust-store insecure="true" />
+			</tls:context>
+		</http:request-connection>
+		</http:request-config>
+		<http:request-config name="johndeere-sapi" doc:name="HTTP Request configuration" doc:id="22ce0b13-225f-40bd-a66e-27ec2d426c9f" doc:description="johndeere-sapi">
+		<http:request-connection host="${httpRequestJohndeere.host}" port="${httpRequestJohndeere.port}" protocol="HTTPS">
+				<tls:context >
+				<tls:trust-store insecure="true" />
+			</tls:context>
+		</http:request-connection>
+		</http:request-config>
+		<http:request-config name="terminal-sapi" doc:name="HTTP Request configuration" doc:id="c450a9f1-08f7-4076-9db3-52e2b9f0ac1f" doc:description="terminal-sapi">
+		<http:request-connection host="${httpRequestTerminal49.host}" port="${httpRequestTerminal49.port}" protocol="HTTPS">
+				<tls:context >
+				<tls:trust-store insecure="true" />
+			</tls:context>
+		</http:request-connection>
+		</http:request-config>
+		<http:request-config name="sftp-sapi" doc:name="HTTP Request configuration" doc:id="40f4b551-52ba-4b9d-9efa-8d2d2d65313a" doc:description="sftp-sapi">
+		<http:request-connection host="${httpRequestsftpEdi.host}" port="${httpRequestsftpEdi.port}" protocol="HTTPS">
+				<tls:context >
+				<tls:trust-store insecure="true" />
+			</tls:context>
+		</http:request-connection>
+	</http:request-config>
+	<import doc:name="Import" doc:id="6747bda5-7754-4278-9829-60e65e9fdbf6" doc:description="common-global" file="common-global.xml" />
+	<import doc:name="Import" doc:id="75e06d5d-b903-46d7-b35c-01dbe99db9df" doc:description="error-handler" file="error-handler.xml" />
+	<import doc:name="Import" doc:id="275272f4-edd0-4088-909d-7a6e1ddb5acc" doc:description="mule-common-logging" file="mule-common-logging.xml" />
+	<configuration doc:name="Configuration" doc:id="03cc7cda-11c3-44db-98b7-bf0ca553b8c7" defaultErrorHandler-ref="error-handler" doc:description="error-handler"/>
+	<sftp:config name="SFTP_VV_Config" doc:name="SFTP Config" doc:id="da1abe74-7427-413b-a0ff-c68209514002" doc:description="delivery-order-valor-victoria-sftp-config">
+		<sftp:connection host="${secure::sftpvv.host}" port="${sftpvv.port}" username="${secure::sftpvv.username}" password="${secure::sftpvv.password}" />
+	</sftp:config>
+	<pubsub:config name="Google_Pub_Sub_Configuration" doc:name="Google Pub Sub Configuration" doc:id="8ed6e69e-4938-4675-9834-9ecbf47c1243" >
+		<pubsub:connection privateKeyId="${secure::gcp.privateKeyId}" clientId="${secure::gcp.clientId}" clientEmail="${secure::gcp.clientEmail}" >
+			<pubsub:private-key ><![CDATA[${secure::gcp.privateKey}]]></pubsub:private-key>
+		</pubsub:connection>
+	</pubsub:config>
+
+
+</mule>

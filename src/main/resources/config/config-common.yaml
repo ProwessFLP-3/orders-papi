@@ -1,0 +1,18 @@
+# Common File to be use in All env
+application:
+  name: "orders-papi"
+milestone:
+  category: "LOG"
+  
+loggerDo:
+  source: "sftp-sapi"
+  target: "cwm-sapi"
+  businessProcessName: "DO order processing"
+  
+loggerConsume:
+  source: "cwm-consume"
+  targetJohnDeere: "johndeere-sapi"
+  targetTerminal: "terminal-49"
+  targetBloom: "sftp-sapi"
+  businessProcessName: "DO order,shipments,events processing"
+

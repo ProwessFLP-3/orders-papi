@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:x12="http://www.mulesoft.org/schema/mule/x12" xmlns:sftp="http://www.mulesoft.org/schema/mule/sftp"
+	xmlns:pubsub="http://www.mulesoft.org/schema/mule/pubsub"
+	xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/pubsub http://www.mulesoft.org/schema/mule/pubsub/current/mule-pubsub.xsd
+http://www.mulesoft.org/schema/mule/sftp http://www.mulesoft.org/schema/mule/sftp/current/mule-sftp.xsd
+http://www.mulesoft.org/schema/mule/x12 http://www.mulesoft.org/schema/mule/x12/current/mule-x12.xsd">
+	<flow name="post-order-request-flow" doc:id="70620db5-3b64-4687-b269-081da8877b5a" >
+		<ee:transform doc:name="logger inputPayload" doc:id="96433155-a54a-4cf9-a424-c96c4c0d1bca" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="inputPayload" ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    correlationId : vars.correlationId,
+    businessProcessName: Mule::p('loggerDo.businessProcessName'),
+    flowName: flow.name,  
+    source: Mule::p('loggerDo.source'),
+    target: Mule::p('loggerDo.target'),
+    httpMethod: attributes.method,
+    message: "Received delivery order requests form file location system api",
+    businessObject: [payload]
+}]]></ee:set-variable>
+				<ee:set-variable variableName="fileName" ><![CDATA[attributes.headers.fileName as String]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<flow-ref doc:name="mile-log:request-received" doc:id="8e2a9046-773e-4d71-ba94-f52e20478273" name="mile-log:request-received"/>
+		<flow-ref doc:name="mile-log:payload-logger" doc:id="4dc0c1ea-4eee-44cd-b1e7-f35d35035d36" name="mile-log:payload-logger"/>
+		<ee:transform doc:name="Removes empty string key values" doc:id="07de5b21-db6e-4341-9947-3bf975014a2d" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+fun treeFilter(value: Any, predicate: (value:Any) -> Boolean) =
+    value  match {
+            case object is Object ->  do {
+               object mapObject ((value, key, index) -> 
+                    (key): treeFilter(value, predicate)
+                )
+                filterObject ((value, key, index) -> predicate(value))
+            }
+            case array is Array -> do {
+                    array map ((item, index) -> treeFilter(item, predicate))
+                                         filter ((item, index) -> predicate(item))                 
+            }
+            else -> $
+    }
+---
+payload treeFilter ((value) -> 
+    value match {
+        case v is Array| Object | Null | "" -> !isEmpty(v)
+        else -> true
+    }
+)]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<ee:transform doc:name="Set CWM Request Payload" doc:id="22e862e0-d953-4268-888d-e3584c4407cc" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json skipNullOn="everywhere"
+---
+payload map{
+        "doNumber": $."doNumber",
+	    "shipmentType": $."shipmentType",
+        "billOfLadingNum": $."billOfLadingNum" default null,
+        "bookingNumber": $."bookingNumber" default null,
+        "originPort": $."originPort" default null,
+        "destinationPort": $."destinationPort" default null,
+        "invoiceRefNum": if($."invoiceRefNum" != null) $."invoiceRefNum" else if($.shipmentType=="IMPORT" or $.shipmentType=="Import" or $.shipmentType=="Domestic" or $.shipmentType=="DOMESTIC") $.billOfLadingNum else if($.shipmentType=="EXPORT" or $.shipmentType=="Export") $.bookingNumber else null,
+        "customerName": $."customerName",
+        "bcoName": $."bcoName",
+        "ocaScac": $."ocaScac",
+        "ocaName": $."ocaName",
+        "vesselName": $."vesselName",
+        "voyageNumber": $."voyageNumber", 
+        "packages": if($."packages" != null) ($."packages" as Number) else 1,
+        "packageUOM": if($."packageUOM" != null and ($."packageUOM" =="Pieces" or $."packageUOM" =="PIECES" or $."packageUOM" =="pieces")) "PC" else "PC",
+        "commodityGoodsNum": $."commodityGoodsNum" default "4611110",
+        "freightDescription": $."freightDescription" default "FAK",
+        "commodityClass": $."commodityClass" default "FAK",
+       
+        "isHazmat": if($."isHazmat"=="N") false else if($."isHazmat"=="Y") true else false,
+        "grossWeight": if($."grossWeight" != null) ($."grossWeight" as Number) else if($."netWeight" != null) ($."netWeight" as Number) else 1,
+        "grossWeightUOM": trim($."weightUOM") default "KG",
+        "netWeight": if($."netWeight" != null) ($."netWeight" as Number) else if($."grossWeight" != null) ($."grossWeight" as Number) else 1,
+        "netWeightUOM": trim($."weightUOM") default "KG",
+        "volume": if($."volume" != null) ($."volume" as Number) else 1,
+        "volumeUOM": $."volumeUOM" default "MTQ",
+        "isShipmentOverweight": $."isShipmentOverWeight" default false,
+        "packageType": $."packageType" default "TOTAL_LOAD",
+        "containerNumber": $."containerNumber",
+        "containerType": trim($."containerType") default "40ST",
+        "sealNumber": $."sealNumber",
+        stops:[
+        	({
+            "stopType":"PICKUP",
+            "stopNumber": 0,
+        	"locationName": $."emptyPickupName",
+			"locationAddress1": $."emptyPickupAddress1",
+            "locationAddress2": $."emptyPickupAddress2",
+			"city": $."emptyPickupCity",
+			"state": $."emptyPickupState",
+			"country": $."emptyPickupCountry" default "US",
+			"postalCode": $."emptyPickupPostalCode"
+        	}) if(($."emptyPickupName" != null) and ($."emptyPickupAddress1" != null) and ($."emptyPickupCity" != null) ) ,
+        	{
+            "stopType":if($.emptyPickupName == null) "PICKUP" else "LIVELOAD",
+            "stopNumber": if($.emptyPickupName == null) 0 else 1,
+        	"locationName": $."originName",
+			"locationAddress1": $."originAddress1",
+            "locationAddress2": $."originAddress2",
+			"city": $."originCity",
+			"state": $."originState",
+			"country": $."originCountry" default "US",
+			"postalCode": $."originPostalCode"
+        	},
+        	{
+            "stopType": "DELIVERY",
+			"stopNumber": if($.emptyPickupName == null) 1 else 2,
+        	"locationName": $."destName",
+			"locationAddress1": $."destAddress1",
+            "locationAddress2": $."destAddress2",
+			"city": $."destCity",
+			"state": $."destState",
+			"country": $."destCountry" default "US",
+			"postalCode": $."destPostalCode"
+        	}
+        ],
+        "pickupDateTime": if(($."pickupDateTime")!=null) ($."pickupDateTime" as LocalDateTime {format: "M/d/yyyy H:m"} as String {format: "yyyy-MM-dd"}) else now() as String{format: "yyyy-MM-dd"},
+        "deliveryDateTime": if(($."deliveryDateTime")!=null) ($."deliveryDateTime" as LocalDateTime {format: "M/d/yyyy H:m"} as String {format: "yyyy-MM-dd"}) else now() as String{format: "yyyy-MM-dd"},
+        "cutOffDate": if(($."cutoffDate")!=null) ($."cutoffDate" as LocalDateTime {format: "M/d/yyyy H:m"} as String {format: "yyyy-MM-dd"}) else now() as String{format: "yyyy-MM-dd"} + |P30D|,
+        "docCutOffDate": if(($."docCutoffDate")!=null) ($."docCutoffDate" as LocalDateTime {format: "M/d/yyyy H:m"} as String {format: "yyyy-MM-dd"}) else if(($."cutoffDate")!=null) ($."cutoffDate" as LocalDateTime {format: "M/d/yyyy H:m"} as String {format: "yyyy-MM-dd"}) else now() as String{format: "yyyy-MM-dd"} + |P28D|
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<ee:transform doc:name="logger inputPayload" doc:id="cc577d8d-393f-4519-a073-c6511e902e9a" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="inputPayload" ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    correlationId : vars.correlationId,
+    businessProcessName: Mule::p('loggerDo.businessProcessName'),
+    flowName: flow.name,  
+    source: Mule::p('loggerDo.source'),
+    target: Mule::p('loggerDo.target'),
+    httpMethod: vars.inputPayload.httpMethod,
+    message: "Transformed the delivery order requests and sent to cwm-sapi",
+    businessObject: [payload]
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<flow-ref doc:name="mile-log:request-sent" doc:id="7d879eb0-9d0e-4cb6-bd68-58208f9d5715" name="mile-log:request-sent"/>
+		<flow-ref doc:name="mile-log:payload-logger" doc:id="e297bb22-d0dd-4bfb-a47e-da5acadf8c73" name="mile-log:payload-logger"/>
+		<flow-ref doc:name="delivery-order-to-cwm-sapi" doc:id="02f92af2-10ae-4ae9-a5ed-30127ee14d02" name="delivery-order-to-cwm-sapi" />
+		<ee:transform doc:name="logger inputPayload" doc:id="3c0590a5-3a15-4be8-ab7c-dc9ebd1332b8" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="inputPayload" ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    correlationId : vars.correlationId,
+    businessProcessName: Mule::p('loggerDo.businessProcessName'),
+    flowName: flow.name,  
+    source: Mule::p('loggerDo.target'),
+    target: Mule::p('loggerDo.source'),
+    httpMethod: vars.inputPayload.httpMethod,
+    message: "Successfully sent delivery order requests to cwm-sapi",
+    businessObject: [payload]
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<ee:transform doc:name="Set Success Response" doc:id="bcc4cea7-ed38-4231-811b-b189ec0f5060" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload..payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<flow-ref doc:name="mile-log:success-response-sent" doc:id="3558f409-9cc2-4e4d-94dd-f47719daf340" name="mile-log:success-response-sent" />
+	</flow>
+</mule>

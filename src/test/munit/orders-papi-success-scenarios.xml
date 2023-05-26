@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit" xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools  http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd">
+	<munit:config name="webhook-eapi-success-scenarios.xml" />
+	<munit:test name="post:\orders-success" doc:id="f9b6d371-ef32-43b9-bf3c-fb0ea61be21e" >
+		<munit:behavior >
+			<munit-tools:mock-when doc:name="cwm-sapi" doc:id="a66c7549-98a4-42b9-8424-e057c3eedc05" processor="http:request" >
+				<munit-tools:with-attributes >
+					<munit-tools:with-attribute whereValue="2c2265d1-5687-4b9a-b171-e04ca0c25c4f" attributeName="doc:id" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return >
+					<munit-tools:payload value="#[output application/json --- readUrl('classpath://dwl-files/output-response-cwm.dwl')]" mediaType="application/json" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution >
+			<munit:set-event doc:name="Set Event" doc:id="cab02398-6882-4c3f-bfc6-b9d8aecf275c" >
+				<munit:payload value="#[output application/json --- readUrl('classpath://dwl-files/input-request.dwl')]" mediaType="application/json" />
+				<munit:attributes value="#[output application/json --- readUrl('classpath://dwl-files/header-input.dwl')]" mediaType="application/json" />
+			</munit:set-event>
+			<flow-ref doc:name="post:\orders:application\json:orders-papi-config" doc:id="596beb05-6acb-43d4-bce4-290073e9feb5" name="post:\orders:application\json:orders-papi-config" />
+		</munit:execution>
+		<munit:validation >
+			<munit-tools:assert-that doc:name="Assert that" doc:id="17844f13-344c-4291-8db6-453553cfe4f2" expression="#[payload]" is="#[MunitTools::notNullValue()]" />
+		</munit:validation>
+	</munit:test>
+	<munit:test name="post:\orders-cwm-conflict" doc:id="9d1da857-98e6-4a92-9a84-6f0beaefea99">
+		<munit:behavior >
+			<munit-tools:mock-when doc:name="cwm-sapi" doc:id="2afa6abd-346c-463a-b341-9d6c792d6857" processor="http:request" >
+				<munit-tools:with-attributes >
+					<munit-tools:with-attribute whereValue="2c2265d1-5687-4b9a-b171-e04ca0c25c4f" attributeName="doc:id" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return >
+					<munit-tools:error typeId="APIKIT:METHOD_NOT_ALLOWED" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution >
+			<munit:set-event doc:name="Set Event" doc:id="ac32ef3d-ca97-422c-94a3-3f1a467427bd" >
+				<munit:payload value="#[output application/json --- readUrl('classpath://dwl-files/input-request.dwl')]" mediaType="application/json" />
+				<munit:attributes value="#[output application/json --- readUrl('classpath://dwl-files/header-input.dwl')]" mediaType="application/json" />
+			</munit:set-event>
+			<flow-ref doc:name="post:\orders:application\json:orders-papi-config" doc:id="cc6aa3db-97a6-4173-aeba-c47330c10a54" name="post:\orders:application\json:orders-papi-config" />
+		</munit:execution>
+		<munit:validation >
+			<munit-tools:assert-that doc:name="Assert that" doc:id="12cf3fff-428d-43b0-8086-38d4a99defbc" expression="#[payload]" is="#[MunitTools::notNullValue()]" />
+		</munit:validation>
+	</munit:test>
+	<munit:test name="post:\orders-fileWrite" doc:id="ebea6ef5-605b-40d1-aed0-12d23f1b4478" >
+		<munit:behavior >
+			<munit-tools:mock-when doc:name="SFTP write" doc:id="d0a0f497-8f4e-4268-b26c-3ee524f2086a" processor="sftp:write" >
+				<munit-tools:with-attributes >
+					<munit-tools:with-attribute whereValue="25e9f971-b5b4-4002-a9a9-5176572cd61f" attributeName="doc:id" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return >
+					<munit-tools:payload value="#[output application/json --- readUrl('classpath://dwl-files/file-write.dwl')]" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution >
+			<munit:set-event doc:name="Set Event" doc:id="4aaa2f58-063f-4505-98f4-43b09dc6823c" >
+				<munit:payload value="#[output application/json --- readUrl('classpath://dwl-files/input-request-missing-required-parameters.dwl')]" mediaType="application/json" />
+				<munit:attributes value="#[output application/json --- readUrl('classpath://dwl-files/header-input.dwl')]" mediaType="application/json" />
+			</munit:set-event>
+			<flow-ref doc:name="post:\orders:application\json:orders-papi-config" doc:id="f96b872d-1eaa-4a2f-911e-2297c21fdff5" name="post:\orders:application\json:orders-papi-config" />
+		</munit:execution>
+		<munit:validation >
+			<munit-tools:assert-that doc:name="Assert that" doc:id="485542a8-c5f4-4665-a984-8bfef9d6f560" expression="#[payload]" is="#[MunitTools::notNullValue()]" />
+		</munit:validation>
+	</munit:test>
+	<munit:test name="post:\orders-fileWrite-missing-parameters" doc:id="16b259f5-9018-416e-813f-3c26a3497169" >
+		<munit:behavior >
+			<munit-tools:mock-when doc:name="cwm-sapi" doc:id="c1867462-ba04-4612-9254-fd0261abd3ba" processor="http:request">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute whereValue="2c2265d1-5687-4b9a-b171-e04ca0c25c4f" attributeName="doc:id" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return >
+					<munit-tools:error typeId="HTTP:BAD_REQUEST" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+			<munit-tools:mock-when doc:name="SFTP write" doc:id="0505023c-c6fe-4bc6-b7d1-498bc4db699c" processor="sftp:write" >
+				<munit-tools:with-attributes >
+					<munit-tools:with-attribute whereValue="25e9f971-b5b4-4002-a9a9-5176572cd61f" attributeName="doc:id" />
+				</munit-tools:with-attributes>
+				<munit-tools:then-return >
+					<munit-tools:payload value="#[output application/json --- readUrl('classpath://dwl-files/file-write.dwl')]" />
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution >
+			<munit:set-event doc:name="Set Event" doc:id="ce04fe3a-6b50-4e72-8a80-1bf10b099135" >
+				<munit:payload value="#[output application/json --- readUrl('classpath://dwl-files/input-request.dwl')]" mediaType="application/json" />
+				<munit:attributes value="#[output application/json --- readUrl('classpath://dwl-files/header-input.dwl')]" mediaType="application/json" />
+			</munit:set-event>
+			<flow-ref doc:name="post:\orders:application\json:orders-papi-config" doc:id="497e3b89-a21e-4d18-900e-835742a362df" name="post:\orders:application\json:orders-papi-config" />
+		</munit:execution>
+		<munit:validation >
+			<munit-tools:assert-that doc:name="Assert that" doc:id="61e4997e-7c3f-4e35-b2a9-a854f25c17d6" expression="#[payload]" is="#[MunitTools::notNullValue()]" />
+		</munit:validation>
+	</munit:test>
+	<munit:test name="APIKIT-Console" doc:id="d5774aa5-6fe4-442c-8f05-92a8a586331e" >
+		<munit:behavior>
+			<munit-tools:mock-when doc:name="Mock when" doc:id="b8e8a92b-8ec6-4528-b6d6-05a30f4b8bfa" processor="apikit:console">
+				<munit-tools:with-attributes >
+					<munit-tools:with-attribute whereValue="orders-papi-config" attributeName="config-ref" />
+				</munit-tools:with-attributes>
+			</munit-tools:mock-when>
+		</munit:behavior>
+		<munit:execution >
+			<flow-ref doc:name="orders-papi-console" doc:id="edde2cf8-fac6-43e0-b766-068f1da2a230" name="orders-papi-console" />
+		</munit:execution>
+		<munit:validation >
+			<munit-tools:assert-that doc:name="Assert that" doc:id="ecf848c6-e439-4eed-a403-095ed4742419" expression="#[payload]" is="#[MunitTools::notNullValue()]" />
+		</munit:validation>
+	</munit:test>
+	<munit:test name="orders-papi-log-data-enrichment" doc:id="9323da11-443d-406a-b089-1a658a306bf1" >
+		<munit:execution >
+			<flow-ref doc:name="mile-log:data-enrinchment-failure" doc:id="8013f7be-f77b-4af6-9677-dc03915a80c4" name="mile-log:data-enrinchment-failure" />
+			<flow-ref doc:name="mile-log:filter-criteria-failed" doc:id="dfb00763-8aaa-4a45-930e-cf1a192693a8" name="mile-log:filter-criteria-failed" />
+		</munit:execution>
+		<munit:validation >
+			<munit-tools:assert-that doc:name="Assert that" doc:id="bb06be45-f432-48ed-9147-0b7bd978df38" expression="#[payload]" is="#[MunitTools::notNullValue()]" />
+		</munit:validation>
+	</munit:test>
+
+
+</mule>

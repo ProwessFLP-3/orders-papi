@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:x12="http://www.mulesoft.org/schema/mule/x12" xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:pubsub="http://www.mulesoft.org/schema/mule/pubsub" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/pubsub http://www.mulesoft.org/schema/mule/pubsub/current/mule-pubsub.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/x12 http://www.mulesoft.org/schema/mule/x12/current/mule-x12.xsd">
+	<flow name="gcp-post-delivery-orderFlow" doc:id="c13c1db0-9ea1-405f-b0c6-77aee123e7a3" >
+		<pubsub:message-listener doc:name="On message listener" doc:id="136ced9b-0def-4f00-be3c-5b4557f0c2fe" config-ref="Google_Pub_Sub_Configuration" projectId="${gcp.projectId}" subscriptionName="${gcp.subscriptionName}">
+			<reconnect frequency="${gcp.frequency}" count="${gcp.retryCount}"/>
+		</pubsub:message-listener>
+		<logger level="INFO" doc:name="Flow Started" doc:id="4549b475-4223-45e8-bf2b-847d80e89f6a" message="Flow started received payload from GCP Consume: #[payload] "/>
+		<ee:transform doc:name="Convert String to Json" doc:id="f3e4dd82-6595-4f9b-9ef0-0dbe806b1e0c">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+read(payload,"application/json")]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<ee:transform doc:name="Transform Request Payload" doc:id="45a58d3f-187c-46c6-9329-89a09fc24eef">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var statusMessage = payload.headers."message-status"[0]
+---
+payload.body ++ {"statusMessage": statusMessage}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<ee:transform doc:name="Set logger inputPayload and correlationId" doc:id="638b8148-655b-46af-8728-3a1e0690d421" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="inputPayload" ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    correlationId : payload.doNumber ++ "-" ++ payload.container.number,
+    businessProcessName: Mule::p('loggerDo.businessProcessName'),
+    flowName: flow.name,  
+    source: Mule::p('loggerConsume.source'),
+    target1: Mule::p('loggerConsume.targetJohnDeere'),
+    target2: Mule::p('loggerConsume.targetTerminal'),
+    target3: Mule::p('loggerConsume.targetBloom'),
+    httpMethod: attributes.method,
+    message: "Received delivery order from cwm-sapi",
+    businessObject: [payload]
+}]]></ee:set-variable>
+				<ee:set-variable variableName="correlationId" ><![CDATA[payload.doNumber ++ "-" ++ payload.container.number]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<flow-ref doc:name="mile-log:request-received" doc:id="5d4acc5f-b867-4f99-a32a-ad881ba58770" name="mile-log:request-received"/>
+		<flow-ref doc:name="mile-log:payload-logger" doc:id="05f13561-5392-45a4-80a6-a1e7d260d5c3" name="mile-log:payload-logger"/>
+		<flow-ref doc:name="mile-log:payload-logger" doc:id="20f52a00-3bac-4da4-b7a3-8acdb6e501c7" name="mile-log:payload-logger"/>
+		<scatter-gather doc:name="Scatter-Gather1" doc:id="7a45ce07-2e38-454a-8438-66789d96df43" >
+			<route>
+				<flow-ref doc:name="deliveryorder-to-johndeere" doc:id="47d8383b-973c-4ab3-a80e-622b92cb7e7d" name="deliveryorder-to-johndeere" />
+			</route>
+			<route>
+				<choice doc:name="Choice" doc:id="8b6ed17a-b5db-4bd2-9127-6c2ed682ffe7" >
+					<when expression='#[((payload."doType" != "DOMESTIC") and (payload.statusMessage contains "DO")) or (payload."doType" !="Domestic" and (payload.statusMessage contains "DO"))]'>
+						<flow-ref doc:name="deliveryorder-to-terminal49" doc:id="2f2e1ddd-b009-4cf1-8cd1-d1f936e28c58" name="deliveryorder-to-terminal49" />
+					</when>
+				</choice>
+			</route>
+			<route>
+				<choice doc:name="Choice" doc:id="a317d600-653f-4a38-9974-377c74a0834b" >
+					<when expression='#[payload.statusMessage contains "DO"]'>
+						<flow-ref doc:name="deliveryorder-to-bloom" doc:id="24e9fd91-a498-4070-89e5-0f178f1504e7" name="deliveryorder-to-bloom" />
+					</when>
+				</choice>
+			</route>
+		</scatter-gather>
+		<ee:transform doc:name="logger input payload" doc:id="53d695fa-8e8e-451d-a3ad-7e30450c79fa">
+			<ee:message />
+			<ee:variables>
+				<ee:set-variable variableName="inputPayload"><![CDATA[%dw 2.0
+output application/json
+---
+{
+    correlationId : vars.correlationId,
+    businessProcessName: Mule::p('loggerDo.businessProcessName'),
+    flowName: flow.name,  
+    source: Mule::p('loggerConsume.source'),
+    target1: Mule::p('loggerConsume.targetJohnDeere'),
+    target2: Mule::p('loggerConsume.targetTerminal'),
+    target3: Mule::p('loggerConsume.targetBloom'),
+    httpMethod: vars.inputPayload.httpMethod,
+    message: "Successfully sent deliveryorder to Blume, Terminal-49 and JohnDeere",
+    businessObject: [payload]
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<flow-ref doc:name="mile-log:payload-logger" doc:id="37ead3c3-1ba6-454e-ae21-e4600047cf90" name="mile-log:payload-logger"/>
+		<ee:transform doc:name="Set Response" doc:id="cde34d77-129b-4231-bf49-0ea831e1817d" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json skipNullOn="everywhere"
+---
+flatten([payload[0].payload] ++ [payload[1].payload]++[payload[2].payload])]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<flow-ref doc:name="mile-log:success-response-received" doc:id="517a591a-6951-4fde-b772-d38a28cb3d7f" name="mile-log:success-response-received"/>
+	</flow>
+</mule>

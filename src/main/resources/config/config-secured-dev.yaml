@@ -1,0 +1,39 @@
+# Use this file for encrypted user/password information.
+# Unencrypted values may be used in this file using standard yaml syntax
+# Encrypted values must be enclosed in ![] within the quotes.
+
+#TLS context configuration
+tls:
+  keyPassword: "![e4kQX0QLXcj19lUEKWyziA==]"
+  password: "![e4kQX0QLXcj19lUEKWyziA==]"
+  
+backendBearerToken:
+  clientSecret: "![a0juUHzIqxQasdfpoinuy/TasdLoasdf8kjKjuBliEdxopfR3aPiNjKaWsdB]"
+  
+sftpvv:
+  username: "![XA5Z3Pr7henNf1g0USrJtg==]"
+  host: "![P4/84/r4cQtjgOVuvoQLZZrQmVqeE8KHZuNXRRvEEM8=]"
+  password: "![mS/a9VuxLjazv/YzXZpGoQ==]"
+  
+gcp:
+  privateKey: "![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]"
+  privateKeyId: "![B2MPrtvflRX40f3ngq1F8uOct/tOYeXiZDokp0VIBhfW53mKRbeR2FcNnSh7Fzr8]"
+  clientEmail: "![GvaIEeCoZ8AU2wuU16g5H7RRzpJxxu9J2NdTE9Q1u8FqSV1DPJ7HpDazLTJf1xM58aGLOpeLOa4ozB26w3d6Mg==]"
+  clientId: "![tZtgqhUCtWy1jaUVMLpabggMMlYYCQ8hKx6Ni9B6EoI=]"
+  
+
+httpRequestcwm:
+  clientId: "![vuihECFwHIGF8yFpldazvw0a+/9RZoqqeZJwG0VW4E36tl1Kbtk3B+6YB09wLqvP]"
+  clientSecret: "![iWE2eftN0Zn9Z++koVPKIivLwu5u7HefpxuYaHOTiF4VyFg6dEuJ9TimTFZbb2IL]"
+  
+httpRequestJohndeere:
+  clientId: "![/5qGfeMD250PrxIwjVglgRbMxEfs3Q/Tcb0k6boFm+83MX1tpGK/W+KYaY9tCehG]"
+  clientSecret: "![4gK4iNgsKc0BQDpkNLGXR1BhhXvZolBS94pRj4Xr24h4XWqTPIijPzrklxBl/R1d]"
+
+httpRequestsftpEdi:
+  clientId: "![B6RV6D5qXri2oNNS6dkFoOz/fiqkeoLZgpgXB65RkOXgkCReeuQACDhPnjGsFXNR]"
+  clientSecret: "![/eYFCNkZr2gYPd8Vrf4D3iVhXcMSmJWwsN7WAAGc0LZmwXtYKLxAXVAxLCkc04dp]"
+
+httpRequestTerminal49:
+  clientId: "![KmVLNuorvdNkHOjpnwXQNQdncqQM31LSpn/BPGjSv4Sgc7nZgHcEKq8S4GUduLw9]"
+  clientSecret: "![vmd0MSkppT10fGnGWAZnh7iR82KK1GGpYmmwzCx90atWZ/iBdDpnj4fmlvHNTdVn]"

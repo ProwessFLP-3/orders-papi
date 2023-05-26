@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:sftp="http://www.mulesoft.org/schema/mule/sftp" xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/sftp http://www.mulesoft.org/schema/mule/sftp/current/mule-sftp.xsd">
+	<sub-flow name="delivery-order-to-cwm-sapi" doc:id="ca671ed8-eea9-4c8c-b578-c9316e4ffebc" >
+		<parallel-foreach doc:name="Parallel For Each" doc:id="1ed92d6e-8791-4732-ae2d-e148e537fcd4">
+					<try doc:name="Try" doc:id="6e765e19-fcb5-4ad6-8e83-c245946ffb39">
+					<ee:transform doc:name="Checking Required Parameters and Future Dates" doc:id="dbb6863a-1341-46ab-933a-2de18ebb6526">
+			<ee:message>
+			</ee:message>
+			<ee:variables>
+						<ee:set-variable variableName="requiredParameters" ><![CDATA[%dw 2.0
+output application/json
+var orderType = upper(payload.shipmentType)
+---
+{
+	"shippingNumber":payload.doNumber,
+	"shippingType":payload.shipmentType,
+	"missing": orderType match{
+		case "EXPORT" -> if(payload.bookingNumber != null) "N" else "Y"
+		case "IMPORT" -> if(payload.billOfLadingNum != null) "N" else "Y"
+		case "DOMESTIC" -> if(payload.billOfLadingNum != null) "N" else "Y"
+       
+		
+},
+"missingOceanInfo": if(payload."ocaScac" == null and payload."ocaName" == null) "Y" else "N"  
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+				<choice doc:name="Is Required Parameters Missing?" doc:id="344129ad-dd5e-42c8-a75e-dc492ca0dbfb">
+			<when expression='#[(vars.requiredParameters.missing =="Y" or vars.requiredParameters.missingOceanInfo == "Y")]'>
+				<flow-ref doc:name="required-parameters-missing" doc:id="98198c69-8e62-4477-a3c9-a3c28637c901" name="required-parameters-missing" />
+			</when>
+			<otherwise>
+				<flow-ref doc:name="mile-log:payload-logger" doc:id="4781c5e3-93d8-4580-ba6b-e7f025df767c" name="mile-log:payload-logger"/>
+						<http:request method="POST" doc:name="cwm-sapi" doc:id="2c2265d1-5687-4b9a-b171-e04ca0c25c4f" config-ref="cwm-sapi" path="${httpRequestcwm.path}" responseTimeout="${httpRequestcwm.responseTimeout}">
+				<reconnect frequency="${httpRequestcwm.frequency}" count="${httpRequestcwm.retryCount}" />
+							<http:headers><![CDATA[#[output application/java
+---
+{
+	correlationId : vars.correlationId,
+	client_secret : Mule::p('secure::httpRequestcwm.clientSecret'),
+	client_id : Mule::p('secure::httpRequestcwm.clientId')
+}]]]></http:headers>
+			</http:request>
+						<flow-ref doc:name="mile-log:payload-logger" doc:id="77164fad-ffe6-45c3-8298-2719233aa338" name="mile-log:payload-logger"/>
+						<flow-ref doc:name="mile-log:success-response-received" doc:id="1f90d5ca-b742-44a3-bf2f-6fa827c5c00f" name="mile-log:success-response-received"/>
+			</otherwise>
+		</choice>
+				<error-handler>
+						<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="26147dc7-57c0-408d-bdbf-1e77444cf012" type="HTTP:BAD_REQUEST">
+							<flow-ref doc:name="required-parameters-missing" doc:id="608a36cf-e3a6-417f-9bca-5818de6898f7" name="required-parameters-missing" />
+						</on-error-continue>
+					<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="baffe5ed-c0d4-4a79-9ffe-471a42fadf57" >
+						<flow-ref doc:name="mile-log:failure-response-received" doc:id="a99fb995-bfa9-42ca-b919-960f8d1ede6e" name="mile-log:failure-response-received" />
+						<ee:transform doc:name="Set Error Response" doc:id="72801238-17d5-4ffb-acc6-aab88f28efc1" >
+							<ee:message >
+								<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"shipmentNumber":vars.requiredParameters.shippingNumber default "No shipping number",
+	"failurePayload": payload,
+	"error": if(error.muleMessage.payload.description != null) error.muleMessage.payload.description else error.description
+}]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<sftp:write doc:name="Write" doc:id="fec1e6ed-742e-4e97-a468-9ec0b6be6395" config-ref="SFTP_VV_Config" path="#[Mule::p('sftpvv.filePathFailed') as String ++ vars.fileName ++ now() as String {format:&quot;yyyyMMddHHmmSSss&quot;} ++ &quot;.txt&quot;]" mode="APPEND" >
+							<reconnect count="${sftpvv.retryCount}" frequency="${sftpvv.frequency}"/>
+						</sftp:write>
+						<flow-ref doc:name="mile-log:failure-response-sent" doc:id="f35bf98b-ea7e-4a86-afcb-380c053dde0a" name="mile-log:failure-response-sent" />
+					</on-error-continue>
+					</error-handler>
+				</try>
+				</parallel-foreach>
+	</sub-flow>
+	<sub-flow name="required-parameters-missing" doc:id="2278294a-806d-4995-a8a4-27ec3f982aa8" >
+		<flow-ref doc:name="mile-log:failure-response-received" doc:id="c2ddd5e7-de8d-4490-87a6-a5fcf7e88c78" name="mile-log:failure-response-received"/>
+		<ee:transform doc:name="Set Json To CSV" doc:id="10235869-d35c-44e9-b668-0712a587e638" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/csv
+var shipType = upper(vars.requiredParameters.shippingType)
+var stopsSize = sizeOf(payload.stops)
+---
+{
+	"doNumber": payload.doNumber default "",
+	"originPort": payload.originPort default "",
+	"destinationPort": payload.destinationPort default "",
+	"shipmentType": payload.shipmentType default "",
+	"containerNumber": payload.containerNumber default "",
+	"customerName": payload.customerName default "",
+	"bcoName":payload.bcoName default "",
+	"pickupDateTime": if(payload."pickupDateTime" != null) ((payload."pickupDateTime" as String ++ " 23:55") as LocalDateTime {format: "yyyy-MM-dd H:m"} as String {format: "M/d/yyyy H:m"}) else "",
+	"deliveryDateTime":if(payload."deliveryDateTime" != null) ((payload."deliveryDateTime" as String ++ " 23:55") as LocalDateTime {format: "yyyy-MM-dd H:m"} as String {format: "M/d/yyyy H:m"}) else "",
+	"emptyPickupName": if(stopsSize==3) payload.stops.locationName[0] else " ",
+	"emptyPickupAddress1": if(stopsSize==3) payload.stops.locationAddress1[0] else " ",
+	"emptyPickupAddress2": if(stopsSize==3) (payload.stops.locationAddress2[0] default "") else " ",
+	"emptyPickupCity": if(stopsSize==3) payload.stops.city[0] else " ",
+	"emptyPickupState": if(stopsSize==3) payload.stops.state[0] else " ",
+	"emptyPickupPostalCode": if(stopsSize==3) payload.stops.postalCode[0] else " ",
+	"emptyPickupCountry": if(stopsSize==3) payload.stops.country[0] else " ",
+	"originName": if(stopsSize==3) payload.stops.locationName[1] else if(stopsSize==2) payload.stops.locationName[0] else "",
+	"originAddress1": if(stopsSize==3) payload.stops.locationAddress1[1] else if(stopsSize==2) payload.stops.locationAddress1[0] else "",
+	"originAddress2": if(stopsSize==3) (payload.stops.locationAddress2[1] default "") else if(stopsSize==2) (payload.stops.locationAddress2[0] default "") else "",
+	"originCity": if(stopsSize==3)payload.stops.city[1] else if(stopsSize==2) payload.stops.city[0] else "",
+	"originState": if(stopsSize==3) payload.stops.state[1] else if(stopsSize==2) payload.stops.state[0] else "",
+	"originPostalCode": if(stopsSize==3)payload.stops.postalCode[1] else if(stopsSize==2) payload.stops.postalCode[0] else "",
+	"originCountry": if(stopsSize==3)payload.stops.country[1] else if(stopsSize==2) payload.stops.country[0] else "",
+	"destName": if(stopsSize==3) payload.stops.locationName[2] else if(stopsSize==2) payload.stops.locationName[1] else "",
+	"destAddress1": if(stopsSize==3)payload.stops.locationAddress1[2] else if(stopsSize==2) payload.stops.locationAddress1[1] else "",
+	"destAddress2": if(stopsSize==3) (payload.stops.locationAddress2[2] default "") else if(stopsSize==2) (payload.stops.locationAddress2[1] default "") else "",
+	"destCity": if(stopsSize==3)payload.stops.city[2] else if(stopsSize==2) payload.stops.city[1] else "",
+	"destState": if(stopsSize==3)payload.stops.state[2] else if(stopsSize==2) payload.stops.state[1] else "",
+	"destPostalCode": if(stopsSize==3)payload.stops.postalCode[2] else if(stopsSize==2) payload.stops.postalCode[1] else "" ,
+	"destCountry": if(stopsSize==3)payload.stops.country[2] else if(stopsSize==2) payload.stops.country[1] else "",
+	"billOfLadingNum": payload."billOfLadingNum" default "",
+	"bookingNumber":payload."bookingNumber" default "",
+	"invoiceRefNum":payload."invoiceRefNum" default "",
+	"commodityClass": payload."commodityClass" default "",
+	"commodityGoodsNum": payload."commodityGoodsNum" default "",
+	"freightDescription":payload."freightDescription" default "",
+	"isHazmat":payload."isHazmat" default "",
+	"containerType": payload."containerType" default "",
+	"sealNumber": payload."sealNumber" default "",
+    "packages": payload."packages" default "",
+    "packageUOM": payload."packageUOM" default "",
+    "cutoffDate": if(payload."cutOffDate" != null) ((payload."cutOffDate" as String ++ " 23:55") as LocalDateTime {format: "yyyy-MM-dd H:m"} as String {format: "M/d/yyyy H:m"}) else "",
+    "docCutoffDate": if(payload."docCutOffDate" != null) ((payload."docCutOffDate" as String ++ " 23:55") as LocalDateTime {format: "yyyy-MM-dd H:m"} as String {format: "M/d/yyyy H:m"}) else "",
+    "grossWeight": payload."grossWeight" default "",
+    "netWeight": payload."netWeight" default "",
+    "weightUOM": payload."netweightUOM" default "",
+    "volume": payload."volume" default "",
+    "volumeUOM": payload."volumeUOM" default "",
+    "ocaScac": payload."ocaScac" default "",
+	"ocaName": payload."ocaName" default "",
+    "vesselName": payload."vesselName" default "",
+    "voyageNumber": payload."voyageNumber" default "",	
+	"error": if(error.description == null) (shipType match{
+        case "IMPORT" -> if(vars.requiredParameters.missing =="N" and vars.requiredParameters.missingOceanInfo == "Y") "Required parameters are missing.Enter any one field [ocaScac or ocaName]" else if(vars.requiredParameters.missing =="Y" and vars.requiredParameters.missingOceanInfo == "N") "Check mandatory fields Import- billOfLadingNum." else "Check mandatory fields Import- billOfLadingNum. Enter any one field [ocaScac or ocaName]"
+        case "EXPORT" -> if(vars.requiredParameters.missing =="N" and vars.requiredParameters.missingOceanInfo == "Y") "Required parameters are missing.Enter any one field [ocaScac or ocaName]" else if(vars.requiredParameters.missing =="Y" and vars.requiredParameters.missingOceanInfo == "N") "Check mandatory fields Export- bookingNumber." else "Check mandatory fields Export- bookingNumber. Enter any one field [ocaScac or ocaName]"
+        case "DOMESTIC" -> if(vars.requiredParameters.missing =="N" and vars.requiredParameters.missingOceanInfo == "Y") "Required parameters are missing.Enter any one field [ocaScac or ocaName]" else if(vars.requiredParameters.missing =="Y" and vars.requiredParameters.missingOceanInfo == "N") "Check mandatory fields Domestic- billOfLadingNum." else "Check mandatory fields Domestic- billOfLadingNum. Enter any one field [ocaScac or ocaName]"
+    }) else if(error.muleMessage.payload.description != null) error.muleMessage.payload.description else error.description
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<sftp:write doc:name="Write" doc:id="25e9f971-b5b4-4002-a9a9-5176572cd61f" config-ref="SFTP_VV_Config" path="#[Mule::p('sftpvv.filePathFailed') as String ++ vars.fileName ++ now() as String {format:&quot;yyyyMMddHHmmSSss&quot;} ++ &quot;.csv&quot;]" mode="APPEND" >
+			<reconnect frequency="${sftpvv.frequency}" count="${sftpvv.retryCount}"/>
+		</sftp:write>
+		<ee:transform doc:name="Set Error Response" doc:id="0df7456c-0f6e-4897-8118-5ffa469a346e" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"shipmentNumber":vars.requiredParameters.shippingNumber default "No shipping number",
+	"error": if(error.muleMessage.payload.description != null) error.muleMessage.payload.description else error.description,
+	"message": "Data has been converted to CSV format and written to the failure folder."
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<flow-ref doc:name="mile-log:failure-response-sent" doc:id="e26172fa-9f0e-4aec-9617-f0e85e8b3845" name="mile-log:failure-response-sent"/>
+	</sub-flow>
+	
+</mule>

@@ -1,0 +1,548 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:sftp="http://www.mulesoft.org/schema/mule/sftp" xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:x12="http://www.mulesoft.org/schema/mule/x12"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/x12 http://www.mulesoft.org/schema/mule/x12/current/mule-x12.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/sftp http://www.mulesoft.org/schema/mule/sftp/current/mule-sftp.xsd">
+	<sub-flow name="cwm-consume-on-error-continue-flow" doc:id="9c469141-8b0d-4cc2-ab51-7d0b2294576d" >
+		<flow-ref doc:name="mile-log:failure-response-received" doc:id="a709e8c1-5e62-460f-8e7a-7c4fbe51e05f" name="mile-log:failure-response-received" />
+		<ee:transform doc:name="Set Error Response" doc:id="5f3662a6-92d4-4c89-b29f-59a5e9768cfb">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"deliveryorderNumber-containerNumber": vars.correlationId,
+	"failurePayload": payload,
+	"error": if(error.muleMessage.payload.description != null) error.muleMessage.payload.description else error.description
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+		<sftp:write doc:name="Write" doc:id="98aab774-a681-44c0-be60-3b12e723e665" config-ref="SFTP_VV_Config" path="#[Mule::p('sftpvv.filePathFailed') as String ++ vars.correlationId ++ now() as String {format:&quot;yyyyMMddHHmmSSss&quot;} ++ &quot;.txt&quot;]" mode="APPEND" >
+			<reconnect frequency="${sftpvv.frequency}" count="${sftpvv.retryCount}" />
+		</sftp:write>
+		<flow-ref doc:name="mile-log:failure-response-sent" doc:id="e4b908e3-4749-41d2-95e7-425bc26e464d" name="mile-log:failure-response-sent" />
+	</sub-flow>
+	<sub-flow name="deliveryorder-to-johndeere" doc:id="b4c8ecd0-ae8f-4e79-abaf-b8bcbf8dada9">
+		<try doc:name="Try" doc:id="7ab3bf57-6f0a-45ac-929d-ac5a4a754c52">
+			<ee:transform doc:name="logger inputPayload" doc:id="13337dd8-3399-4a01-bd0a-c4c04d7fa302">
+				<ee:message />
+				<ee:variables>
+					<ee:set-variable variableName="inputPayload"><![CDATA[%dw 2.0
+output application/json
+---
+{
+    correlationId : vars.correlationId,
+    businessProcessName: Mule::p('loggerDo.businessProcessName'),
+    flowName: flow.name,  
+    source: Mule::p('loggerConsume.source'),
+    target: Mule::p('loggerConsume.targetJohnDeere'),
+    httpMethod: vars.inputPayload.httpMethod,
+    message: "Delivery order information sending to johndeere-sapi",
+    businessObject: [payload]
+}]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<flow-ref doc:name="mile-log:request-sent" doc:id="035f1671-ef76-4bad-bf3d-995c88a70a45" name="mile-log:request-sent" />
+			<ee:transform doc:name="JohnDeere Transformation" doc:id="18a06220-65e4-4bcf-94ed-b24bcefd03a9">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json skipNullOn="everywhere"
+var stopsSize=sizeOf(payload.stops)
+var shipmentstopsSize=sizeOf(payload.shipments[0].stops)
+---
+{
+  "shipmentNumber": payload.doNumber,
+  "tenantId": "30",
+  "trackingNumber": if (payload.deliveryOrderCustomerReferenceNumber !=null) payload.deliveryOrderCustomerReferenceNumber else  payload.doNumber,
+  "accountCode": "John Deere",
+  "carrierName": "Valor Victoria",
+  "scac": "VVAH",
+  "customerName": "John Deere",
+  "mode": "INTERMODAL",
+  "containerNumber": payload.container.number,
+  "containerType": payload.container.equipmentSizeType,
+  "containerWeight": payload.cargo.netWeight,
+  "weightUnitOfMeasure": if(payload.cargo.grossWeightUOM == "KG") "Kilograms" else if(payload.cargo.grossWeightUOM == "LB") "Pounds" else null,
+  "movementType": "INTERMODAL",
+  "isManaged": false,
+  "orderNumbers": [
+    payload.doNumber
+  ],
+  "canceled": if(payload."statusMessage"=="204 DO Cancelled") true else false,
+  "forwarder":"Valor Victoria",
+  "stops": if(payload."statusMessage" == "201 Shipment Created" or payload."statusMessage" == "202 Shipment Updated") (payload.shipments[0].stops map {
+          "locationId": $.locationCode,
+          "sequenceNumber": $$,
+          "stopRole": if($$ == 0) "originRamp" else if ($$ == (shipmentstopsSize-1)) "destinationRamp" else "intermediaryRamp",
+          "name": $.locationName,
+          "address1": $.locationAddress1,
+          "city": $.city,
+          "stateProvinceCode": $.state,
+          "postalCode": $.postalCode,
+          "countryCode": $.country,
+          "requested": if($$==0 and (payload.deliverySchedule.plannedPickup != null)) ((payload.deliverySchedule.plannedPickup ++ " 23:55") as LocalDateTime {format:"MM-dd-yyyy HH:mm"} as DateTime) else if($$==(stopsSize - 1) and (payload.deliverySchedule.scheduledDeliveryDate != null)) ((payload.deliverySchedule.scheduledDeliveryDate  ++ " 23:55") as LocalDateTime {format:"MM-dd-yyyy HH:mm"} as DateTime) else null
+        }) else (payload.stops map {
+          "locationId": $.locationCode,
+          "sequenceNumber": $$,
+          "stopRole": if($$ == 0) "originRamp" else if ($$ == (stopsSize-1)) "destinationRamp" else "intermediaryRamp",
+          "name": $.locationName,
+          "address1": $.locationAddress1,
+          "city": $.city,
+          "stateProvinceCode": $.state,
+          "postalCode": $.postalCode,
+          "countryCode": $.country,
+          "requested": if($$==0 and (payload.deliverySchedule.plannedPickup != null)) ((payload.deliverySchedule.plannedPickup ++ " 23:55") as LocalDateTime {format:"MM-dd-yyyy HH:mm"} as DateTime) else if($$==(stopsSize - 1) and (payload.deliverySchedule.scheduledDeliveryDate != null)) ((payload.deliverySchedule.scheduledDeliveryDate  ++ " 23:55") as LocalDateTime {format:"MM-dd-yyyy HH:mm"} as DateTime) else null
+        }),
+  "handlingUnits": [
+    {
+      "handlingUnitId": payload.doNumber,
+      "packagingType":payload.container.equipmentSizeType,
+      "quantity": 1,
+      "containerNumber": payload.container.number,
+      "pickLocSequenceNumber": 0,
+      "dropLocSequenceNumber": stopsSize - 1
+    }
+    ],
+     "referenceNumbers": [
+	{
+		"type": "SHID",
+		"value": if(payload.deliveryOrderCustomerReferenceNumber !=null) payload.deliveryOrderCustomerReferenceNumber else  payload.doNumber
+	}
+  ]
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<flow-ref doc:name="mile-log:payload-logger" doc:id="c7cd36ec-26b3-4006-afcb-82156b8fab43" name="mile-log:payload-logger" />
+			<http:request method="POST" doc:name="johndeere-sapi" doc:id="e06edd76-ef3d-4027-85dc-56463162f014" config-ref="johndeere-sapi" path="${httpRequestJohndeere.path}" responseTimeout="${httpRequestJohndeere.responseTimeout}" >
+				<reconnect frequency="${httpRequestJohndeere.frequency}" count="${httpRequestJohndeere.retryCount}" />
+				<http:headers ><![CDATA[#[output application/java
+---
+{
+	correlationId : vars.correlationId,
+	client_secret : Mule::p('secure::httRequestJohndeere.clientSecret'),
+	client_id : Mule::p('secure::httpRequestJohndeere.clientId')
+}]]]></http:headers>
+			</http:request>
+			<ee:transform doc:name="logger inputPayload" doc:id="f7247b10-9219-4ebf-9182-0d87e5c1a607">
+				<ee:message />
+				<ee:variables>
+					<ee:set-variable variableName="inputPayload"><![CDATA[%dw 2.0
+output application/json
+---
+{
+    correlationId : vars.correlationId,
+    businessProcessName: Mule::p('loggerDo.businessProcessName'),
+    flowName: flow.name,  
+    source: Mule::p('loggerConsume.targetJohnDeere'),
+    target: Mule::p('loggerConsume.source'),
+    httpMethod: vars.inputPayload.httpMethod,
+    message: "Success Response received from johndeere-sapi",
+    businessObject: [payload]
+}]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<flow-ref doc:name="mile-log:success-response-sent" doc:id="558500b3-0ae0-4d12-ae6f-09d5a475f3c7" name="mile-log:success-response-sent"/>
+			<flow-ref doc:name="mile-log:payload-logger" doc:id="94b0fd2d-ccf7-4eee-9495-ce81cd140627" name="mile-log:payload-logger" />
+			<flow-ref doc:name="mile-log:success-response-received" doc:id="723a5090-dd2b-49d8-93aa-d6c2098a9b16" name="mile-log:success-response-received" />
+			<ee:transform doc:name="Set Response" doc:id="230bbbe2-1971-4b09-82af-248e073415f6">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<error-handler>
+				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="a4dbdf87-889f-4dc1-b421-ac7ff56dd955">
+					<flow-ref doc:name="cwm-consume-on-error-continue-flow" doc:id="e73970f5-902f-482b-9ab9-c65e53b53b09" name="cwm-consume-on-error-continue-flow"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+	<sub-flow name="deliveryorder-to-terminal49" doc:id="78695e97-7ce7-4f8f-a682-4bb392c6ec5e" >
+		<try doc:name="Try" doc:id="78fe6249-de47-4166-b5b3-b4573ec3eb76" >
+			<ee:transform doc:name="logger inputPayload" doc:id="dcf2404a-13f6-46fd-88c7-29d6d106e14e" >
+				<ee:message />
+				<ee:variables >
+					<ee:set-variable variableName="inputPayload" ><![CDATA[%dw 2.0
+output application/json
+---
+{
+    correlationId : vars.correlationId,
+    businessProcessName: Mule::p('loggerDo.businessProcessName'),
+    flowName: flow.name,  
+    source: Mule::p('loggerConsume.source'),
+    target: Mule::p('loggerConsume.targetTerminal'),
+    httpMethod: vars.inputPayload.httpMethod,
+    message: "Delivery order information sending to terminal49-sapi",
+    businessObject: [payload]
+}]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<flow-ref doc:name="mile-log:request-sent" doc:id="977505f6-4d0c-4b00-aa73-1fbe1db60ac6" name="mile-log:request-sent"/>
+			<ee:transform doc:name="Terminal49 Transformation" doc:id="67594acd-d272-4994-b0d7-96f2c6f08217" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+var shipmentType = payload.doType
+var stopSize = (sizeOf(payload.stops)-1)
+---
+{
+  "requestType": if(payload.doType=="EXPORT") "booking_number"  else if(payload.doType=="IMPORT") "bill_of_lading" else "container",
+  "requestNumber": if(payload.doType=="EXPORT") payload."booking" else if(payload.doType=="IMPORT") payload."billOfLading" else null,
+  "shipmentTags": shipmentType match{
+    case "IMPORT" ->  if((payload.stops.city[0] == "Los Angeles" or payload.stops.city[0] == "Long Beach") and payload.customerName == "OEC") ['1','Wardini'] else
+    if((payload.stops.city[0] == "Los Angeles" or payload.stops.city[0] == "Long Beach") and payload.customerName == "Flexport") ['1','Supra'] else
+	if((payload.stops.city[0] == "Los Angeles" or payload.stops.city[0] == "Long Beach") and payload.customerName == "Expeditors") ['1','GPM'] else
+	['1']
+
+    case "EXPORT" ->  if(payload.bcoName == "John Deere" and payload.stops.city[stopSize] == "Jacksonville") ['5','Evans'] else ['5'] },
+  "scac": payload.standardCarrierAlphaCode,
+  "type": "tracking_request"
+}]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<flow-ref doc:name="mile-log:payload-logger" doc:id="e320a18c-88da-4ca4-9d94-bd7fcf9fceb5" name="mile-log:payload-logger"/>
+			<http:request method="POST" doc:name="terminal49-sapi" doc:id="33c11c31-92dc-4b9b-801c-90f1b9ff3933" config-ref="terminal-sapi" path="${httpRequestTerminal49.path}" responseTimeout="${httpRequestTerminal49.responseTimeout}" >
+				<reconnect frequency="${httpRequestTerminal49.frequency}" count="${httpRequestTerminal49.retryCount}" />
+				<http:headers ><![CDATA[#[output application/java
+---
+{
+	correlationId : vars.correlationId,
+	client_secret : Mule::p('secure::httpRequestTerminal49.clientSecret'),
+	client_id : Mule::p('secure::httpRequestTerminal49.clientId')
+}]]]></http:headers>
+			</http:request>
+			<ee:transform doc:name="logger inputPayload" doc:id="2cf22049-cce7-41eb-80de-2000c1f0c9a0">
+				<ee:message />
+				<ee:variables>
+					<ee:set-variable variableName="inputPayload"><![CDATA[%dw 2.0
+output application/json
+---
+{
+    correlationId : vars.correlationId,
+    businessProcessName: Mule::p('loggerDo.businessProcessName'),
+    flowName: flow.name,  
+    source: Mule::p('loggerConsume.targetTerminal'),
+    target: Mule::p('loggerConsume.source'),
+    httpMethod: vars.inputPayload.httpMethod,
+    message: "Success response received from terminal49-sapi",
+    businessObject: [payload]
+}]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<flow-ref doc:name="mile-log:success-response-sent" doc:id="66c252b5-fade-4351-bee3-2845d6f14d09" name="mile-log:success-response-sent"/>
+			<flow-ref doc:name="mile-log:payload-logger" doc:id="e54e078e-cdcb-4727-bd5b-6c8686e8cd7c" name="mile-log:payload-logger"/>
+			<flow-ref doc:name="mile-log:success-response-received" doc:id="828bc615-78b5-4fbf-abac-a52db44f8f54" name="mile-log:success-response-received" />
+			<ee:transform doc:name="Set Response" doc:id="8ec1307e-aa46-4627-89ff-9afd666b758c" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<error-handler>
+				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="1c6aaba0-521d-4494-8a58-2bb3d27ccb91" >
+					<flow-ref doc:name="cwm-consume-on-error-continue-flow" doc:id="1fea92bc-0256-416a-a18d-802d9664579c" name="cwm-consume-on-error-continue-flow"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+	<sub-flow name="deliveryorder-to-bloom" doc:id="d1a66ff1-2c2b-4f75-926f-1359bcbb0ac2">
+		<try doc:name="Try" doc:id="b668f089-3956-457e-818d-de2371f6908f">
+			<ee:transform doc:name="logger inputPayload" doc:id="e6989d75-8eb3-46b0-8b5e-6912beaf7b89">
+				<ee:message />
+				<ee:variables>
+					<ee:set-variable variableName="inputPayload"><![CDATA[%dw 2.0
+output application/json
+---
+{
+    correlationId : vars.correlationId,
+    businessProcessName: Mule::p('loggerDo.businessProcessName'),
+    flowName: flow.name,  
+    source: Mule::p('loggerConsume.source'),
+    target: Mule::p('loggerConsume.targetJohnBloom'),
+    httpMethod: vars.inputPayload.httpMethod,
+    message: "Delivery order information translating to EDI and sending to sftp-sapi",
+    businessObject: [payload]
+}]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<flow-ref doc:name="mile-log:request-sent" doc:id="f74be79f-6133-40bf-974a-059cfcd6f710" name="mile-log:request-sent"/>
+			<ee:transform doc:name="EDI" doc:id="2f32008f-4489-43e3-86c5-e8154d6410f7">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/java
+import * from dw::core::Strings
+var stopsSize=sizeOf(payload.stops)
+var status = if (payload.statusMessage contains "Create") "Create" else if(payload.statusMessage contains "Update") "Update" else "Cancel"
+---
+{
+	Delimiters: "*>U~",
+	TransactionSets: {
+		v004010: {
+			"204": [{
+				Group: {
+					GS01: "SM"
+				},
+				Heading: {
+					"020_B2": {
+						B202: "VALR",
+						B204: "CO-" ++ payload.doNumber,
+						B206: "CC"
+					},
+					"030_B2A": {
+						B2A01: status match{
+							case 'Create'-> "00"
+                            case 'Cancel'-> "01"
+                            case 'Update'-> "04"
+						}
+					},
+					"080_L11": [{
+						L1101: if ( payload.doType=='EXPORT' ) ("BOL-" ++ payload.booking as String) else ("BOL-" ++ payload.billOfLading as String),
+						L1102: "BM"
+					},
+					{
+						L1101: if ( payload.doType=='EXPORT' ) ("BKG-" ++ payload.booking as String) else ("BKG-" ++ payload.billOfLading as String),
+						L1102: "BN"
+					},
+					({
+						L1101: payload.vessel,
+						L1102: "ABS"
+					}) if(payload.voyage != null),
+					({
+						L1101: payload.voyage,
+						L1102: "ABS"
+					}) if(payload.voyage != null),
+					{
+						L1101: "RAIL",
+						L1102: "MD"
+					},
+					{
+						L1101: "ORDREF-" ++ payload.invoiceReferenceNumber as String,
+						L1102: "OR"
+					},
+					{
+						L1101: payload.customerCode,
+						L1102: "LW"
+					},
+					{
+						L1101: if ( (payload.deliverySchedule.fumigationRequestedAt) == "Origin" ) "Y" else "N",
+						L1102: "FO"
+					},
+					{
+						L1101: if ( (payload.deliverySchedule.fumigationRequestedAt) == "Destination" ) "Y" else "N",
+						L1102: "FD"
+					}],
+					("090_G62": {
+						G6201: "DA",
+						G6202: payload.deliverySchedule.documentationCutOffDate as Date {
+							format:"MM-dd-yyyy"
+						} as Date {
+							format:"yyyyMMdd"
+						},
+						G6203: "E",
+						G6204: (payload.deliverySchedule.documentationCutOffDate ++ " 23:55") as LocalDateTime {
+							"format": "M-d-yyyy HH:mm"
+						} as Time {
+							format: "HHmm"
+						},
+						G6205: "UT"
+					})if(payload.deliverySchedule.documentationCutOffDate != null),
+					"110_AT5": [{
+						AT501: payload.doType  match{
+							case 'IMPORT'-> "IP"
+                            case 'EXPORT'-> "XP"
+                            case 'DOMESTIC'-> "DM"
+						}
+					}],
+					"0200_Loop": [{
+						"200_N7": {
+							N701: substring(payload.container.number,0,4),
+							N702: substring(payload.container.number,4,(sizeOf(payload.container.number)-1)),
+							N703: payload.cargo.grossWeight,
+							N704: "G",
+							N711: "CN",
+							N717: if ( payload.cargo.grossWeightUOM =="KG" or payload.cargo.grossWeightUOM == "KGs" ) "K" else "L",
+							N718: (payload.container.number last 1) as Number,
+							N722: payload.container.equipmentSizeType
+						},
+						("210_M7": [{
+							M701: payload.container.seal
+						}])if(payload.container.seal != null)
+					}]
+				},
+				Detail: {
+					"0300_Loop": payload.stops map{
+						"010_S5": {
+							S501: $.stopNumber + 1,
+							S502: stopsSize match{
+								case 2 -> if ( $$==0 ) "PA" else "DP"
+        case 3 -> if ( $$==0 ) "PA" else if ( $$==1 ) "LD" else "DP"
+							}
+						},
+						"030_G62": [({
+							G6201: "10",
+							G6202: payload.deliverySchedule.plannedPickup as Date {
+							format:"MM-dd-yyyy"
+						} as Date {
+							format:"yyyyMMdd"
+						},
+							G6203: "E",
+							G6204: (payload.deliverySchedule.plannedPickup ++ " 23:55") as LocalDateTime {
+							format: "M-d-yyyy HH:mm"
+						} as Time {
+							format: "HHmm"
+						},
+							G6205: "UT"
+						}) if((payload.deliverySchedule.plannedPickup) != null and ($$==0)),
+						({
+							G6201: "CA",
+							G6202: payload.deliverySchedule.cutOffDate as Date {
+							format:"MM-dd-yyyy"
+						} as Date {
+							format:"yyyyMMdd"
+						},
+							G6203: "E",
+							G6204: (payload.deliverySchedule.cutOffDate ++ " 23:55") as LocalDateTime {
+							"format": "M-d-yyyy HH:mm"
+						} as Time {
+							format: "HHmm"
+						},
+							G6205: "UT"
+						}) if((payload.deliverySchedule.cutOffDate) != null and ($$==0)),
+						({
+							G6201: "17",
+							G6202: payload.deliverySchedule.scheduledDeliveryDate as Date {
+							format:"MM-dd-yyyy"
+						} as Date {
+							format:"yyyyMMdd"
+						},
+							G6203: "E",
+							G6204: (payload.deliverySchedule.scheduledDeliveryDate ++ " 23:55") as LocalDateTime {
+							"format": "M-d-yyyy HH:mm"
+						} as Time {
+							format: "HHmm"
+						},
+							G6205: "UT"
+						}) if((payload.deliverySchedule.scheduledDeliveryDate) != null and $$==(stopsSize-1))],
+						"0310_Loop": {
+							"070_N1": {
+								N101: "SF",
+								N102: $.locationName
+							},
+							"090_N3": [{
+								N301: $.locationAddress1
+							}],
+							"100_N4": {
+								N401: $.city,
+								N402: $.state,
+								N403: $.postalCode,
+								N404: "US"
+							}
+						},
+					},
+					"0320_Loop": [{
+						"130_L5": {
+							L502: payload.cargo.freightDescription
+						},
+						"0325_Loop": [{
+							"0330_Loop": [{
+								"146_LFH": [{
+									LFH01: "ADI",
+									LFH02: upper((payload.cargo.isHazmat) as String),
+								}]
+							}]
+						}]
+					}]
+				},
+				Summary: {
+					"010_L3": {
+						L309: payload.cargo.grossVolume,
+						L310: "E"
+					}
+				}
+			}]
+		}
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables >
+					<ee:set-variable variableName="requestPayload" ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<flow-ref doc:name="mile-log:payload-logger" doc:id="6532bc5a-9fbf-4acc-8e79-b016d021e70d" name="mile-log:payload-logger"/>
+			<x12:write doc:name="Write" doc:id="e65d4447-1a2f-48a6-8f72-bf14e149fdb8" config-ref="X12_EDI_Config">
+				<reconnect frequency="${x12.frequency}" count="${x12.retryCount}"/>
+			</x12:write>
+			<ee:transform doc:name="Set EDI to Plain Text" doc:id="b3f74096-35e9-4cf3-abd6-d7fe40b83a3a">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+var edi = payload replace '~' with '~\n'
+---
+if((edi)[-1]=='\n') edi[0 to -2] else edi]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<flow-ref doc:name="mile-log:payload-logger" doc:id="8947d39f-5e51-4d6e-aa9e-da5b19df0b54" name="mile-log:payload-logger"/>
+			<http:request method="POST" doc:name="sftp-sapi-EDI" doc:id="ac471829-e0c9-4b91-a692-e2a0ccf36ecc" config-ref="sftp-sapi" path="${httpRequestsftpEdi.path}" responseTimeout="${httpRequestsftpEdi.responseTimeout}" >
+				<reconnect frequency="${httpRequestsftpEdi.frequency}" count="${httpRequestsftpEdi.retryCount}" />
+				<http:headers ><![CDATA[#[output application/java
+---
+{
+	correlationId : vars.correlationId,
+	client_secret : Mule::p('secure::httpRequestsftpEdi.clientSecret'),
+	client_id : Mule::p('secure::httpRequestsftpEdi.clientId')
+}]]]></http:headers>
+				<http:query-params ><![CDATA[#[output application/java
+---
+{
+	orderNumber : vars.requestPayload.doNumber
+}]]]></http:query-params>
+			</http:request>
+			<ee:transform doc:name="logger inputPayload" doc:id="42f2329d-d948-4db8-8375-6b4eaa12bf26">
+				<ee:message />
+				<ee:variables>
+					<ee:set-variable variableName="inputPayload"><![CDATA[%dw 2.0
+output application/json
+---
+{
+    correlationId : vars.correlationId,
+    businessProcessName: Mule::p('loggerDo.businessProcessName'),
+    flowName: flow.name,  
+    source: Mule::p('loggerConsume.source'),
+    target: Mule::p('loggerConsume.targetJohnBloom'),
+    httpMethod: vars.inputPayload.httpMethod,
+    message: "successfully wrote deliveryOrder EDI document in sftp-sapi",
+    businessObject: [payload]
+}]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			<flow-ref doc:name="mile-log:payload-logger" doc:id="6815b007-9fc8-4f66-80ba-a4434410ce89" name="mile-log:payload-logger"/>
+			<flow-ref doc:name="mile-log:success-response-received" doc:id="3bfc9c63-6a8c-412f-be36-b6ca9c2f1dca" name="mile-log:success-response-received" />
+			<flow-ref doc:name="mile-log:success-response-sent" doc:id="ecc23abc-17b7-42f1-b643-6d3709b31b19" name="mile-log:success-response-sent"/>
+			<ee:transform doc:name="Set Response" doc:id="9210d3df-563b-416a-aef0-4998f290e0cb">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			<error-handler>
+				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="1d67a1b2-4c48-465f-a9e1-13734b20a0e2">
+					<flow-ref doc:name="cwm-consume-on-error-continue-flow" doc:id="776809de-8286-4843-ad7e-0b195a5abaec" name="cwm-consume-on-error-continue-flow"/>
+
+		</on-error-continue>
+			</error-handler>
+		</try>
+	</sub-flow>
+</mule>
