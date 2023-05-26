@@ -155,13 +155,6 @@
 			<version>1.0.2</version>
 			<scope>test</scope>
 		</dependency>
-		<dependency>
-			<groupId>3d244ed7-6ddf-49a9-be6d-96e22048cbc0</groupId>
-			<artifactId>orders-papi</artifactId>
-			<version>1.0.6</version>
-			<classifier>raml</classifier>
-			<type>zip</type>
-		</dependency>
 	</dependencies>
 
 	<repositories>
